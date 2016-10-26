@@ -4,6 +4,7 @@ module Dislocations
 using JuLIP
 using JuLIP.ASE
 using MaterialsScienceTools.Elasticity: elastic_moduli, voigt_moduli
+using ForwardDiff
 
 const Afcc = JMatF([ 0.0 1 1; 1 0 1; 1 1 0])
 
@@ -162,11 +163,11 @@ edge dislocation. The elastic moduli are taken to within `TOL` accuracy (
 function u_edge{T}(x, y, b, Cv::Array{T,2}; TOL = 1e-4)
    Cv = copy(Cv)
 
-   # >>>>>>>>> START DEBUG >>>>>>>>
-   Cv[2,2] = Cv[3,3] = Cv[1,1]
-   Cv[1,3] = Cv[2,3] = Cv[1,2]
-   Cv[4,4] = Cv[5,5] = Cv[6,6] = (Cv[1,1] - Cv[1,2])/2
-   # <<<<<<<<< END DEBUG <<<<<<<<<
+   # # >>>>>>>>> START DEBUG >>>>>>>>
+   # Cv[2,2] = Cv[3,3] = Cv[1,1]
+   # Cv[1,3] = Cv[2,3] = Cv[1,2]
+   # Cv[4,4] = Cv[5,5] = Cv[6,6] = (Cv[1,1] - Cv[1,2])/2
+   # # <<<<<<<<< END DEBUG <<<<<<<<<
 
    # maxCv = maximum(abs(Cv))
    # Iz = find(abs(Cv[:])/maxCv .<= TOL)
@@ -198,30 +199,30 @@ function u_edge{T}(x, y, b, Cv::Array{T,2}; TOL = 1e-4)
    # the solution is now given in terms of two auxiliary functions q and t
    # note that only log(q/t) and log(q*t) occure, which we rewrite as
    # 0.5 * log(q²/t²) and 0.5 * log(q²*t²)
+
    q² = x.^2 + 2 * x .* y * λ * cos(ϕ) + y.^2 * λ^2
    t² = x.^2 - 2 * x .* y * λ * cos(ϕ) + y.^2 * λ^2
 
    # LOOKS LIKE THESE ARE ACTUALLY NUMERICALLY UNSTABLE!!!!!
-   # ux = - (b / 4*π) * (
-   #       atan( (2*x.*y*λ*sin(ϕ)) ./ (x.^2 - λ^2*y.^2) )
-   #       + (c̄11^2 - Cv[1,2]^2) / (2*c̄11*Cv[6,6]*sin(2*ϕ)) * (0.5 * log(q²./t²))
-   #    )
-   # uy = (λ*b/(4*π*c̄11*sin(2*ϕ))) * (
-   #       (c̄11 - Cv[1,2]) * cos(ϕ) * (0.5 * log(q².*t²))
-   #       - (c̄11 + Cv[1,2]) * sin(ϕ) *
-   #                atan( (y.^2*λ^2*sin(2*ϕ)) ./ (x.^2 - λ^2 * y.^2 * cos(2*ϕ)) )
-   #    )
-
+   ux = - (b / 4*π) * (
+         atan( (2*x.*y*λ*sin(ϕ)) ./ (x.^2 - λ^2*y.^2) )
+         + (c̄11^2 - Cv[1,2]^2) / (2*c̄11*Cv[6,6]*sin(2*ϕ)) * (0.5 * log(q²./t²))
+      )
+   uy = (λ*b/(4*π*c̄11*sin(2*ϕ))) * (
+         (c̄11 - Cv[1,2]) * cos(ϕ) * (0.5 * log(q².*t²))
+         - (c̄11 + Cv[1,2]) * sin(ϕ) *
+                  atan( (y.^2*λ^2*sin(2*ϕ)) ./ (x.^2 - λ^2 * y.^2 * cos(2*ϕ)) )
+      )
 
    # ISOTROPIC CASE:
-   # LOOKS LIKE THIS FORMULA IS ROTATED BY PI/4!!!!
+   # LOOKS LIKE THIS FORMULA IS ROTATED BY PI/4!!!!???? maybe this is not the problem
    # ux = b/(2*π) * ( atan(x ./ y) + (x .* y) ./ (2*(1-ν) * r²) )
    # ux = - (b / 4*π) * ( atan( (2*x.*y*λ*sin(ϕ)) ./ (x.^2 - λ^2*y.^2) ) )
-   ux = - (b / 4*π) * ( atan( (2*x.*y) ./ (x.^2 - y.^2) ) )
+   # ux = - (b / 4*π) * ( atan( (2*x.*y) ./ (x.^2 - y.^2) ) )
 
    # uy = -b/(2*π) * ( (1-2*ν)/(4*(1-ν)) * log(r²) + (y.^2 - x.^2) ./ (4*(1-ν) * r²) )
    # uy = (λ*b/(4*π*c̄11)) * ( (c̄11 - Cv[1,2]) * (0.5 * log(q².*t²)) )
-   uy = (b/(4*π*c̄11)) * ( (c̄11 - Cv[1,2]) * (0.5 * log(q².*t²)) )
+   # uy = (b/(4*π*c̄11)) * ( (c̄11 - Cv[1,2]) * (0.5 * log(q².*t²)) )
 
    # check that the solution is really real
    @assert isreal(ux)
@@ -237,6 +238,28 @@ implementation of the CLE displacement field for a general
 straight dislocation line in direction ξ with burgers vector b and
 elastic moduli C.
 """
-function u_general(X, b, ξ, C::Array{Float64, 4})
-   
+function u_general(X, b, C::Array{Float64, 4})
+   X = X |> mat
+   x, y, z = X[1,:], X[2,:], X[3,:]
+
+   # implements HL (13-85)
+   function det_aik(p, C)
+      a = [ C[i,1,k,1] + (C[i,1,k,2] + C[i,2,k,1]) * p + C[i,2,k,2] * p^2
+            for i=1:3, k=1:3 ]
+      return det(a)
+   end
+
+   # Compute the coefficients of det_aik
+   f = p -> det_aik(p, C)
+   A = [ f(0.0), f'(0.0), f''(0.0), f'''(0.0), f''''(0.0), f'''''(0.0), f''''''(0.0) ]
+   for n = 2:6
+      A[n+1] /= factorial(n)
+   end
+
+end
+
+
+
+
+
 end

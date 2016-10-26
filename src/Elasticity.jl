@@ -1,8 +1,7 @@
 
 module Elasticity
 
-using JuLIP: AbstractAtoms, AbstractCalculator, calculator,
-         stress, defm, set_defm!
+using JuLIP: AbstractAtoms, AbstractCalculator, calculator, stress, defm, set_defm!
 
 
 typealias Tensor{T} Array{T,4}
@@ -32,7 +31,7 @@ function elastic_moduli(calc::AbstractCalculator, at::AbstractAtoms)
       set_defm!(at, Ih * F0, updatepositions=true)
       Sm = stress(calc, at)
       C[i, a, :, :] = (Sp - Sm) / (2*h)
-      Ih[i,a] -= h
+      Ih[i,a] += h
    end
    # symmetrise it - major symmetries C_{iajb} = C_{jbia}
    for i = 1:3, a = 1:3, j=1:3, b=1:3
@@ -51,8 +50,7 @@ end
 
 voigt_moduli(at::AbstractAtoms) = voigt_moduli(calculator(at), at)
 
-voigt_moduli(calc::AbstractCalculator, at::AbstractAtoms) =
-   voigt_moduli(elastic_moduli(calc, at))
+voigt_moduli(calc::AbstractCalculator, at::AbstractAtoms) = voigt_moduli(elastic_moduli(calc, at))
 
 const voigtinds = [1, 5, 9, 6, 3, 2]
 
